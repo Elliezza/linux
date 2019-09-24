@@ -30,11 +30,187 @@
 #include "gpu_ipa.h"
 #endif /* CONFIG_CPU_THERMAL_IPA */
 
+#include "../../backend/gpu/mali_kbase_pm_metrics.h"
+#include "../../../../../cpufreq/cpufreq_governor.h"
+
+#include <linux/gpandoon.h>
+#include <linux/kthread.h>
+#include <linux/delay.h>
+#include <linux/errno.h>
+#include <linux/module.h>
+#include <linux/devfreq.h>
+#include <linux/math64.h>
+#include <linux/delay.h>
+//#include <linux/cpufreq_pandoon.h>
+#include <linux/proc_fs.h>
+#include<linux/slab.h>                 //kmalloc()
+#include<linux/uaccess.h>              //copy_to/from_user()
+//#include "governor.h"
+#include <linux/sched.h>
+#include <linux/ioctl.h>
+#include <linux/kthread.h>
+
+#include <linux/random.h>
+wait_queue_head_t wq;
+int flag = 0;
+
+static struct task_struct *wait_thread;
+
+
+struct frequencies{
+        long unsigned int gf;
+        unsigned int f1;
+        unsigned int f2;
+	bool capturing;
+};
+
+struct infos{
+	int nFs;
+	int pFs;
+	int GU;
+	int U1;
+	int U2;
+};
+//bool cap=false;
+#define next_state _IO('p','n')
+#define capture_freqs _IOR('p','c',struct frequencies *)
+#define next_freq _IOW('p','f', int*)
+#define next_layer_withinfos _IOWR('p','l',struct infos*)
+
+
+char value = '0';
+//char etx_array[20]="try_proc_array\n";
+static int len = 1;
+
+static ssize_t read_proc(struct file *filp, char __user *buffer, size_t length,loff_t * offset);
+static ssize_t write_proc(struct file *filp, const char *buff, size_t len, loff_t * off);
+static long my_ioctl(struct file *file, unsigned int cmd, unsigned long arg);
+
+static struct file_operations proc_fops = {
+       // .open = open_proc,
+        .read = read_proc,
+        .write = write_proc,
+        .unlocked_ioctl=my_ioctl,
+       // .release = release_proc
+};
+
+
+
+
+static ssize_t read_proc(struct file *filp, char __user *buffer, size_t length,loff_t * offset)
+{
+    printk(KERN_INFO "proc file read.....\n");
+    if(len)
+        len=0;
+    else{
+        len=1;
+        return 0;
+    }
+    copy_to_user( buffer, &value, sizeof(value));
+ 
+    return length;;
+}
+struct frequencies freqs;
+ 
+static ssize_t write_proc(struct file *filp, const char *buff, size_t len, loff_t * off)
+{
+    printk(KERN_INFO "proc file wrote.....\n");
+    copy_from_user(&value,buff,sizeof(value));
+    printk(KERN_INFO "value=%c\n",value);
+    if (value=='0')
+	freqs.capturing=false;
+    if (value=='1')
+	freqs.capturing=true;
+    return len;
+}
+
+struct infos info;
+int U,UU;
+int fff;
+int f_index=0;
+
+
+u64 prev_cpu_wall[8]={0,0,0,0,0,0,0,0};//or now
+u64 prev_cpu_idle[8]={0,0,0,0,0,0,0,0};
+
+
+static long my_ioctl(struct file *file, unsigned int cmd, unsigned long arg){
+	switch(cmd){
+		case next_state:
+			flag = 1 ;
+			wake_up_interruptible (&wq);
+			break;
+		
+		case next_freq:
+			flag=2;
+			copy_from_user(&f_index, (int*)arg, sizeof(int));
+			wake_up_interruptible (&wq);
+			break;
+		
+		case next_layer_withinfos:
+			flag=2;
+			copy_from_user(&info, (struct infos*)arg, sizeof(struct infos));
+			info.pFs=f_index;	
+			f_index=info.nFs;
+			wake_up_interruptible( &wq);
+			unsigned int max_load1,max_load2;
+			max_load1=max_load2=0;
+		        unsigned int j;
+			for(j=0;j<8;j++) {
+				u64 cur_wall_time, cur_idle_time;
+	        	        unsigned int idle_time, wall_time;
+		                unsigned int load;
+        		        int io_busy = 1;	
+				cur_idle_time = get_cpu_idle_time(j, &cur_wall_time, io_busy);
+				printk("cur_idle_time:%llu,cur_wall_time:%llu\n",cur_idle_time,cur_wall_time);
+				wall_time = (unsigned int)(cur_wall_time - prev_cpu_wall[j]);
+				printk("wall_time:%u,prev_cpu_wall:%llu\n",wall_time,prev_cpu_wall[j]);
+				prev_cpu_wall[j] = cur_wall_time;
+				idle_time = (unsigned int)(cur_idle_time - prev_cpu_idle[j]);
+				if (idle_time>wall_time)
+					idle_time=wall_time;
+				printk("idle_time:%u,prev_cpu_idle:%llu\n",idle_time,prev_cpu_idle[j]);
+				prev_cpu_idle[j] = cur_idle_time;
+				load = (100 * (wall_time - idle_time)) / wall_time;
+				printk("load for core %d is %d\n",j,load);
+				if(j<4){
+					if (load > max_load1)
+	                        		max_load1 = load;
+				}
+				else{
+					if (load > max_load2)
+						max_load2 = load;
+				}
+			}
+			//while(flag>0){udelay(10);};//{printk("sallll\n");udelay(1000);};
+			//printk("1111\n");
+			//printk("6666\n");
+			info.U1=max_load1;
+			info.U2=max_load2;
+			info.GU=U;
+			printk("gpu:%d,u1:%d,u2:%d\n",info.GU,info.U1,info.U2);
+			copy_to_user((struct infos*)arg, &info, sizeof(struct infos) );
+			printk("8888\n");
+			break;
+		case capture_freqs:
+			copy_to_user((struct frequencies*) arg, &freqs, sizeof(freqs));
+			break;
+		
+	}
+	return 0;
+
+
+}
+
+
+
+
+
 #ifdef CONFIG_MALI_MIDGARD_DVFS
 typedef void (*GET_NEXT_FREQ)(struct kbase_device *kbdev, int utilization);
 GET_NEXT_FREQ gpu_dvfs_get_next_freq;
 
-static char *governor_list[G3D_MAX_GOVERNOR_NUM] = {"Default", "Static", "Booster"};
+static char *governor_list[G3D_MAX_GOVERNOR_NUM] = {"Default", "Static", "Booster","Pandoon"};
 #endif /* CONFIG_MALI_MIDGARD_DVFS */
 
 #define GPU_DVFS_TABLE_SIZE(X)  ARRAY_SIZE(X)
@@ -87,6 +263,179 @@ static int gpu_dvfs_governor_default(struct kbase_device *kbdev, int utilization
 
 	return 0;
 }
+
+//struct kbase_device *gkd;
+//bool gset;
+int tfunc(void *input){
+	struct kbase_device *kd=(struct kbase_device*)input;
+	struct exynos_context * platform;
+	platform=(struct exynos_context *) kd->platform_context;
+	//int i=0;
+	//if(!gset){
+	//	gset=1;
+	//	gkd=kd;
+	//}
+	/*while(true){
+		printk("platform step:%d",platform->step);
+		platform->step=i;
+		i++;
+		i=i%5;
+		udelay(2000);
+	}*/
+	
+
+
+	//struct devfreq *df=(struct devfreq*) input;
+	//u32 flags=0;
+	//int i=1;
+	int index=0;
+	int index1=0;
+	int index2=0;
+	unsigned long f1=237143000;
+	//long unsigned int f2=767000000;
+	unsigned int freq_req1,freq_req2;	
+	//struct cpufreq_frequency_table *freq_table1;
+	//struct cpufreq_frequency_table *freq_table2; 
+	unsigned int freq_table1[]={200000,300000,400000,500000,600000,700000,800000,900000,1000000,1100000,1200000,1300000,1400000,1500000,1600000,1700000,1800000,1900000,2000000};
+	unsigned int freq_table2[]={200000,300000,400000,500000,600000,700000,800000,900000,1000000,1100000,1200000,1300000,1400000};
+	printk("salaaam\n");
+	int i=0;
+	for (i = 0; i < platform->table_size; i++) {
+                printk("%d,%u\n",i,platform->table[i].clock);
+                        
+        }
+
+	if(psett2 && psett1){
+		printk("hiii\n");
+	//	freq_table1=globpolicy1->freq_table;
+	//	freq_table2=globpolicy2->freq_table;
+		unsigned long T1,B1,T2,B2,T,B;
+		unsigned long TT1,BB1,TT2,BB2,TT,BB;
+		//int UU;
+		//int U;
+		T1=0;
+		B1=0;
+		T2=1;
+		B2=1;
+		U=1;
+		
+		TT1=TT2=BB1=BB2=TT=BB=0;
+		while(true){
+			
+			//f1=df->profile->freq_table[index++];
+			freq_req1 = freq_table1[index1];
+			freq_req2 = freq_table2[index2];
+			////df->profile->target(df->dev.parent, &f1, flags);
+			platform->step=index;
+			__cpufreq_driver_target(globpolicy1, freq_req1, CPUFREQ_RELATION_H);
+			__cpufreq_driver_target(globpolicy2, freq_req2, CPUFREQ_RELATION_H);
+			freqs.gf=platform->cur_clock;
+			freqs.f1=freq_req1;
+		        freqs.f2=freq_req2;
+			//freqs.capturing=cap;
+			//printk("gpuindex:%d,index1:%d,index2:%d\n",index,index1,index2);
+			//printk("frequency setting to %lu, %u,%u\n",freqs.gf,freq_req1,freq_req2);
+			get_random_bytes(&index, sizeof(int)-1);
+			get_random_bytes(&index1, sizeof(int)-1);
+			get_random_bytes(&index2, sizeof(int)-1);
+			index=index%8;
+			index1=index1%19;
+			index2=index2%13;
+			//udelay(16000);
+			//T=T2-T1;
+			//B=B2-B1;
+			//U=(100*B)/T;
+			//printk("now_busy:%lu,prev_busy:%lu\n",kd->pm.backend.metrics.prev_busy,kd->pm.backend.metrics.time_busy);
+			//printk("T1:%lu,T2:%lu,B1:%lu,B2:%lu,gpu utilisation:%d\n",T1,T2,B1,B2,U);
+			//kbase_pm_get_dvfs_utilisation(kd,&T1,&B1);
+			//TT1=platform->time_tick;
+			//BB1=platform->time_busy;
+			//UU=(100*B)/T;
+			//printk("platform tick:%lu,platform busy:%lu,platform_idle:%lu,UU:%d\n",platform->time_tick,platform->time_busy,platform->time_idle,UU);
+			//TT1=TT2;
+			//BB1=BB2;
+			T1=T2;
+			B1=B2;
+		
+			wait_event_interruptible(wq, flag != 0);
+			kbase_pm_get_dvfs_utilisation(kd,&T2,&B2);
+			U=(100*(B2-B1))/(T2-T1);
+			printk("B2:%lu,B1:%lu,T2:%lu,T1:%lu,U:%d\n", B2,B1,T2,T1,U);
+			//flag=0;
+			//TT2=platform->time_tick;
+			//BB2=platform->time_busy;
+			if(flag==2){
+				//index1=f_index;
+				//index1=index1%9;
+				index1=f_index%100;
+				index2=(f_index/100);
+				index2=index2%100;
+				index=(f_index/10000)-1;
+				printk("f_index:%d,index:%d,index1:%d,index2:%d\n",f_index,index,index1,index2);	
+			}
+			flag=0;
+			//freqs.gf=platform->cur_clock;
+			//freqs.f1=freq_req1;
+			//freqs.f2=freq_req2;			
+                        printk("gpuindex:%d,index1:%d,index2:%d\n",index,index1,index2);
+                        printk("frequency setting to %lu, %u,%u\n",freqs.gf,freq_req1,freq_req2);
+
+			printk("9999\n");
+			//flag=0;
+		}
+
+	}
+	return 0;
+}
+
+
+static int gpu_dvfs_governor_pandoon(struct kbase_device *kbdev, int utilization)
+{
+
+
+
+    static bool first=1;
+	if (first){
+		proc_create("pandoon",0666,NULL,&proc_fops);	
+		init_waitqueue_head(&wq);
+		freqs.capturing=false;
+		first=0;
+		//pthread_t pt;
+		wait_thread=kthread_create(tfunc,(void*)kbdev,"wthread");
+		if (wait_thread) {
+	                printk("Thread Created successfully\n");
+        	        wake_up_process(wait_thread);
+        	} else
+                	printk(KERN_INFO "Thread creation failed\n");
+		return 0;
+	}else
+		return 0;
+
+
+
+	////struct exynos_context *platformi;
+	/* HACK: On Linux es2gears and glmark2-es2 doesn't utilize 100% 
+	 * of the GPU. So we need to keep it on the high frequency to get 
+	 * proper performance. */
+	/*utilization = 100;
+	static int dir=0;
+	platform = (struct exynos_context *) kbdev->platform_context;
+	if (!platform)
+		return -ENODEV;
+
+	if ((platform->step < platform->table_size-1)) {
+		platform->step++;
+		//platform->down_requirement = platform->table[platform->step].stay_count;
+		//DVFS_ASSERT(platform->step < platform->table_size);
+	} else {
+		platform->down_requirement = platform->table[platform->step].stay_count;
+		platform->step--;
+	}
+
+	return 0;*/
+}
+
+
 
 static int gpu_dvfs_governor_static(struct kbase_device *kbdev, int utilization)
 {
@@ -232,6 +581,19 @@ int gpu_dvfs_governor_init(struct kbase_device *kbdev, int governor_type)
 #endif
 		platform->step = gpu_dvfs_get_level(platform, G3D_GOVERNOR_DEFAULT_CLOCK_BOOSTER);
 		break;
+	
+	
+	case G3D_DVFS_GOVERNOR_PANDOON:
+		gpu_dvfs_get_next_freq = (GET_NEXT_FREQ)&gpu_dvfs_governor_pandoon;
+		platform->table = gpu_dvfs_infotbl_default;
+		platform->table_size = GPU_DVFS_TABLE_SIZE(gpu_dvfs_infotbl_default);
+#ifdef CONFIG_DYNIMIC_ABB
+		platform->devfreq_g3d_asv_abb = gpu_abb_infobl_default;
+#endif
+		platform->step = gpu_dvfs_get_level(platform, G3D_GOVERNOR_DEFAULT_CLOCK_PANDOON);
+		break;
+	
+	
 	default:
 		GPU_LOG(DVFS_WARNING, "[gpu_dvfs_governor_init] invalid governor type\n");
 		gpu_dvfs_get_next_freq = (GET_NEXT_FREQ)&gpu_dvfs_governor_default;

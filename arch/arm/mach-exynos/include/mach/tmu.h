@@ -20,8 +20,8 @@
 #define UNUSED_THRESHOLD 0xFF
 
 #define COLD_TEMP		19
-#define HOT_NORMAL_TEMP		95
-#define HOT_CRITICAL_TEMP	110
+#define HOT_NORMAL_TEMP		75
+#define HOT_CRITICAL_TEMP	100
 #define MIF_TH_TEMP1		85
 #define MIF_TH_TEMP2		95
 
@@ -32,11 +32,11 @@
 #define GPU_TH_TEMP4		105
 #define GPU_TH_TEMP5		115
 #elif defined(CONFIG_SOC_EXYNOS5422)
-#define GPU_TH_TEMP1		80
-#define GPU_TH_TEMP2		90
-#define GPU_TH_TEMP3		95
-#define GPU_TH_TEMP4		100
-#define GPU_TH_TEMP5		110
+#define GPU_TH_TEMP1		75
+#define GPU_TH_TEMP2		80
+#define GPU_TH_TEMP3		85
+#define GPU_TH_TEMP4		90
+#define GPU_TH_TEMP5		95
 #else
 #define GPU_TH_TEMP1		85
 #define GPU_TH_TEMP2		90

@@ -731,15 +731,16 @@
 	};
 
 	/* i2c0 INA231 Sensors */
-	/*
-	- include/linux/platform_data/ina231.h
+	
+	//- include/linux/platform_data/ina231.h
+/*
+	config         = INA231_CONFIG(VSH_CT(eVSH_CT_588uS)      | \
+                                        VBUS_CT(eVBUS_CT_588uS)   | \
+                                        AVG_BIT(eAVG_4)           | \
+                                        eSHUNT_BUS_VOLT_CONTINUOUS);
+        update_period  = CONVERSION_DELAY(eVSH_CON_588uS, eVBUS_CON_588uS, eAVG_CON_4);   // unit = usec
+*/	
 
-	config         = INA231_CONFIG(VSH_CT(eVSH_CT_8244uS)      | \
-                                        VBUS_CT(eVBUS_CT_8244uS)   | \
-                                        AVG_BIT(eAVG_16)           | \
-                                        eSHUNT_BUS_VOLT_CONTINUOUS),
-        update_period  = CONVERSION_DELAY(eVSH_CON_8244uS, eVBUS_CON_8244uS, eAVG_CON_16),   // unit = usec
-	*/
 
 	i2c@12C60000 {
 		status = "okay";
@@ -751,8 +752,8 @@
 			enable = <0>;
 			max_A = <9>;
 			shunt_R_mohm = <10>;
-			config = <0x45FF>;
-			update_period = <263808>;
+			config = <0x42DF>;
+			update_period = <4704>;
 		};
 		ina231@41  {
 			compatible = "hardkernel,INA231";
@@ -761,8 +762,8 @@
 			enable = <0>;
 			max_A = <3>;
 			shunt_R_mohm = <10>;
-			config = <0x45FF>;
-			update_period = <263808>;
+			config = <0x42DF>;
+			update_period = <4704>;
 		};
 		ina231@44  {
 			compatible = "hardkernel,INA231";
@@ -771,8 +772,8 @@
 			enable = <0>;
 			max_A = <5>;
 			shunt_R_mohm = <10>;
-			config = <0x45FF>;
-			update_period = <263808>;
+			config = <0x42DF>;
+			update_period = <4704>;
 		};
 		ina231@45  {
 			compatible = "hardkernel,INA231";
@@ -781,8 +782,8 @@
 			enable = <0>;
 			max_A = <2>;
 			shunt_R_mohm = <10>;
-			config = <0x45FF>;
-			update_period = <263808>;
+			config = <0x42DF>;
+			update_period = <4704>;
 		};
 	};
 
